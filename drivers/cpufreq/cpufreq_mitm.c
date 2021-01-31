@@ -10,6 +10,8 @@
  * published by the Free Software Foundation.
  */
 
+#define __MITM_dprint(format, ...) if (printk_ratelimit()) { pr_err("[MITM_DEBUG][%d] " format "\n", __LINE__, ##__VA_ARGS__); }
+
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/cpu.h>
@@ -90,6 +92,7 @@ static unsigned int generic_powersave_bias_target(struct cpufreq_policy *policy,
 	freq_lo = freq_table[index].frequency;
 	index = cpufreq_table_find_index_l(policy, freq_avg);
 	freq_hi = freq_table[index].frequency;
+    __MITM_dprint("freq_lo=%d freq_hi=%d", freq_lo, freq_hi);
 
 	/* Find out how long we have to be in hi and lo freqs */
 	if (freq_hi == freq_lo) {
@@ -390,6 +393,7 @@ static void od_exit(struct dbs_data *dbs_data)
 
 static void od_start(struct cpufreq_policy *policy)
 {
+    __MITM_dprint("starting mitm module, built %s %s", __DATE__, __TIME__);
 	struct od_policy_dbs_info *dbs_info = to_dbs_info(policy->governor_data);
 
 	dbs_info->sample_type = OD_NORMAL_SAMPLE;
