@@ -20,7 +20,7 @@
 #include <linux/tick.h>
 #include <linux/sched/cpufreq.h>
 
-#include "cpufreq_ondemand.h"
+#include "cpufreq_mitm.h"
 
 /* On-demand governor macros */
 #define DEF_FREQUENCY_UP_THRESHOLD		(80)
@@ -86,13 +86,14 @@ static unsigned int generic_powersave_bias_target(struct cpufreq_policy *policy,
 	freq_req = freq_table[index].frequency;
 	freq_reduc = freq_req * od_tuners->powersave_bias / 1000;
 	freq_avg = freq_req - freq_reduc;
+    __MITM_dprint("freq_req=%u freq_reduc=%u freq_avg=%u", freq_req, freq_reduc, freq_avg);
 
 	/* Find freq bounds for freq_avg in freq_table */
 	index = cpufreq_table_find_index_h(policy, freq_avg);
 	freq_lo = freq_table[index].frequency;
 	index = cpufreq_table_find_index_l(policy, freq_avg);
 	freq_hi = freq_table[index].frequency;
-    __MITM_dprint("freq_lo=%d freq_hi=%d", freq_lo, freq_hi);
+    __MITM_dprint("freq_lo=%u freq_hi=%u", freq_lo, freq_hi);
 
 	/* Find out how long we have to be in hi and lo freqs */
 	if (freq_hi == freq_lo) {
@@ -137,6 +138,8 @@ static void dbs_freq_increase(struct cpufreq_policy *policy, unsigned int freq)
  * (default), then we try to increase frequency. Else, we adjust the frequency
  * proportional to load.
  */
+
+#include <asm/div64.h>
 static void od_update(struct cpufreq_policy *policy)
 {
 	struct policy_dbs_info *policy_dbs = policy->governor_data;
@@ -145,10 +148,30 @@ static void od_update(struct cpufreq_policy *policy)
 	struct od_dbs_tuners *od_tuners = dbs_data->tuners;
 	unsigned int load = dbs_update(policy);
 
+    static u64 last_timestamp = 0;
+    static u32 missed_cnt = 0;
+    u64 current_timestamp = ktime_get_ns(), t_diff = current_timestamp - last_timestamp;
+
+    od_tuners->raw_load_value = load;
+    od_tuners->raw_load_value_timestamp = current_timestamp;
+
+    if (t_diff < 1000000000ull) {
+        missed_cnt++;
+        return;
+    }
+    last_timestamp = current_timestamp;
+    u64 calling_freq = (missed_cnt + 1) * 100ull * 1000000000ull, elapsed_ms = t_diff;
+    do_div(calling_freq, t_diff);
+    do_div(elapsed_ms, 1000000ull);
+
 	dbs_info->freq_lo = 0;
+
+    __MITM_dprint("[cpu=%u] load=%3u elapsed=%4llums call=%3u.%02u", smp_processor_id(), load, elapsed_ms, (u32)calling_freq / 100, (u32)calling_freq % 100);
+    missed_cnt = 0;
 
 	/* Check for frequency increase */
 	if (load > dbs_data->up_threshold) {
+        __MITM_dprint("HIGHLOAD policy->cur=%u policy->max=%u", policy->cur, policy->max);
 		/* If switching to max speed, apply sampling_down_factor */
 		if (policy->cur < policy->max)
 			policy_dbs->rate_mult = dbs_data->sampling_down_factor;
@@ -160,6 +183,8 @@ static void od_update(struct cpufreq_policy *policy)
 		min_f = policy->cpuinfo.min_freq;
 		max_f = policy->cpuinfo.max_freq;
 		freq_next = min_f + load * (max_f - min_f) / 100;
+        __MITM_dprint("freq_next=%u min_f=%u max_f=%u", freq_next, min_f, max_f);
+        //dump_stack();
 
 		/* No longer fully busy, reset rate_mult */
 		policy_dbs->rate_mult = 1;
@@ -186,6 +211,7 @@ static unsigned int od_dbs_update(struct cpufreq_policy *policy)
 	 * OD_SUB_SAMPLE doesn't make sense if sample_delay_ns is 0, so ignore
 	 * it then.
 	 */
+    //__MITM_dprint("sample_type=%d", sample_type);
 	if (sample_type == OD_SUB_SAMPLE && policy_dbs->sample_delay_ns > 0) {
 		__cpufreq_driver_target(policy, dbs_info->freq_lo,
 					CPUFREQ_RELATION_H);
@@ -200,6 +226,7 @@ static unsigned int od_dbs_update(struct cpufreq_policy *policy)
 		return dbs_info->freq_hi_delay_us;
 	}
 
+    //__MITM_dprint("od_dbs_update() ret=%u", dbs_data->sampling_rate * policy_dbs->rate_mult);
 	return dbs_data->sampling_rate * policy_dbs->rate_mult;
 }
 
@@ -325,12 +352,20 @@ gov_show_one_common(ignore_nice_load);
 gov_show_one_common(io_is_busy);
 gov_show_one(od, powersave_bias);
 
+static ssize_t show_raw_load_value(struct gov_attr_set *attr_set, char *buf)
+{
+    struct dbs_data *dbs_data = to_dbs_data(attr_set);
+	struct od_dbs_tuners *tuners = dbs_data->tuners;
+    return sprintf(buf, "%u 0x%016llx\n", tuners->raw_load_value, tuners->raw_load_value_timestamp);
+}
+
 gov_attr_rw(sampling_rate);
 gov_attr_rw(io_is_busy);
 gov_attr_rw(up_threshold);
 gov_attr_rw(sampling_down_factor);
 gov_attr_rw(ignore_nice_load);
 gov_attr_rw(powersave_bias);
+gov_attr_ro(raw_load_value);
 
 static struct attribute *od_attributes[] = {
 	&sampling_rate.attr,
@@ -339,6 +374,7 @@ static struct attribute *od_attributes[] = {
 	&ignore_nice_load.attr,
 	&powersave_bias.attr,
 	&io_is_busy.attr,
+    &raw_load_value.attr,
 	NULL
 };
 

@@ -1,3 +1,4 @@
+#define __MITM_dprint(format, ...) if (printk_ratelimit()) { pr_err("[MITM_DEBUG][%d] " format "\n", __LINE__, ##__VA_ARGS__); }
 /*
  * drivers/cpufreq/cpufreq_governor.c
  *
@@ -328,6 +329,7 @@ static void gov_set_update_util(struct policy_dbs_info *policy_dbs,
 	struct cpufreq_policy *policy = policy_dbs->policy;
 	int cpu;
 
+    __MITM_dprint("delay_us=%u", delay_us);
 	gov_update_sample_delay(policy_dbs, delay_us);
 	policy_dbs->last_sample_time = 0;
 
