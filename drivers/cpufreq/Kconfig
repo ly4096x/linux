@@ -147,6 +147,10 @@ config CPU_FREQ_GOV_MITM
 	tristate "'mitm' cpufreq policy governor"
 	select CPU_FREQ_GOV_COMMON
 
+config CPU_FREQ_GOV_MITM_USERSPACE
+	tristate "'mitm_userspace' cpufreq policy governor"
+	select CPU_FREQ_GOV_COMMON
+
 config CPU_FREQ_GOV_ONDEMAND
 	tristate "'ondemand' cpufreq policy governor"
 	select CPU_FREQ_GOV_COMMON
